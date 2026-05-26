@@ -1,6 +1,5 @@
 package com.its.gestioneordinirestclient.dto;
 
-import com.its.gestioneordinirestclient.model.StatusEnum;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;

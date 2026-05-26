@@ -2,6 +2,7 @@ package com.its.gestioneordinirestclient.controller;
 
 import com.its.gestioneordinirestclient.dto.OrderRequestDTO;
 import com.its.gestioneordinirestclient.dto.OrderResponseDTO;
+import com.its.gestioneordinirestclient.dto.PaymentResponse;
 import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.service.OrderService;
 import jakarta.validation.Valid;
@@ -55,17 +56,18 @@ public class OrderController {
         return ResponseEntity.noContent().build();
     }
 
-    /**
-     * CALLBACK ENDPOINT FOR MICROSERVICES
-     * This receives the status synchronization update sent by the payment service.
-     */
-    @PutMapping(path = "/{id}/status")
+    @PutMapping(path = "/status/{id}")
     public ResponseEntity<OrderResponseDTO> updateOrderStatusExternal(
             @PathVariable UUID id,
             @RequestParam StatusEnum status) {
 
-        // Ensure you add 'updateStatusFromExternal' or 'addPaymentToOrder' method inside your OrderService
         OrderResponseDTO response = orderService.updateStatusFromExternal(id, status);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping(path = "/payments/{id}", produces = "application/json")
+    public ResponseEntity<List<PaymentResponse>> getPaymentsByOrderId(@PathVariable UUID id) {
+        List<PaymentResponse> response = orderService.getPayments(id);
         return ResponseEntity.ok(response);
     }
 }
