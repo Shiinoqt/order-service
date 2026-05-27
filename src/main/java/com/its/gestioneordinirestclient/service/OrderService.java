@@ -11,6 +11,7 @@ import com.its.gestioneordinirestclient.model.Order;
 import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -19,35 +20,25 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Service class responsible for managing the business logic of orders.
- * It handles CRUD operations, order status updates, and interacts with an external
- * payment microservice via {@link RestClient}.
+ * Service class responsible for managing business logic related to orders.
+ * It provides operations for creating, retrieving, updating, and soft-deleting orders,
+ * as well as interacting with external payment services via REST and RabbitMQ message queues.
  */
 @Service
 @RequiredArgsConstructor
 public class OrderService {
 
-    /**
-     * Repository used for database operations on {@link Order} entities.
-     */
     private final OrderRepository orderRepository;
-
-    /**
-     * Mapper component used to convert between Order entities and Data Transfer Objects (DTOs).
-     */
     private final OrderMapper orderMapper;
-
-    /**
-     * REST client configured to communicate with the external payment microservice.
-     */
     private final RestClient paymentRestClient;
+    private final RabbitTemplate rabbitTemplate;
 
     /**
      * Retrieves an order by its unique identifier.
      *
      * @param id the {@link UUID} of the order to retrieve
-     * @return the {@link OrderResponseDTO} representing the found order
-     * @throws NotFoundException if no order is found with the specified id
+     * @return the {@link OrderResponseDTO} containing the order details
+     * @throws NotFoundException if no order is found with the given ID
      */
     public OrderResponseDTO getById(UUID id) {
         Order order = orderRepository.findById(id)
@@ -56,9 +47,9 @@ public class OrderService {
     }
 
     /**
-     * Retrieves all existing orders.
+     * Retrieves all existing orders in the system.
      *
-     * @return a {@link List} of {@link OrderResponseDTO} containing all orders
+     * @return a {@link List} of {@link OrderResponseDTO}s
      */
     public List<OrderResponseDTO> getAll() {
         return orderRepository.findAll()
@@ -68,29 +59,28 @@ public class OrderService {
     }
 
     /**
-     * Fetches the payment history/details associated with a specific order from the payment microservice.
+     * Fetches the payment history for a specific order from an external REST service.
      *
-     * @param id the {@link UUID} of the order
-     * @return a {@link List} of {@link PaymentResponse} details
-     * @throws PaymentFailedException if the external call fails or an error occurs during processing
+     * @param id the {@link UUID} of the order whose payments are to be retrieved
+     * @return a {@link List} of {@link PaymentResponse}s associated with the order
+     * @throws PaymentFailedException if the external REST call fails or encounters an error
      */
     public List<PaymentResponse> getPayments(UUID id) {
         try {
             return paymentRestClient.get()
                     .uri("/payments/orders/{id}", id)
                     .retrieve()
-                    .body(new ParameterizedTypeReference<List<PaymentResponse>>() {
-                    });
+                    .body(new ParameterizedTypeReference<List<PaymentResponse>>() {});
         } catch (Exception e) {
             throw new PaymentFailedException("Failed to get payments for order " + id);
         }
     }
 
     /**
-     * Creates and saves a new order. Newly created orders default to a status of {@link StatusEnum#UNPAID}.
+     * Creates and saves a new order with an initial status of {@code UNPAID}.
      *
      * @param dto the {@link OrderRequestDTO} containing the details of the order to create
-     * @return the {@link OrderResponseDTO} of the newly created and saved order
+     * @return the {@link OrderResponseDTO} representing the newly created order
      */
     public OrderResponseDTO create(OrderRequestDTO dto) {
         Order order = Order.builder()
@@ -104,17 +94,14 @@ public class OrderService {
     }
 
     /**
-     * Initiates the payment workflow for a specific order.
-     * <p>
-     * The method checks if the order is eligible for payment, temporarily moves its status to
-     * {@link StatusEnum#PROCESSING}, and forwards the payment request to the payment microservice.
-     * If the external gateway is unreachable, the order status is safely rolled back to {@link StatusEnum#UNPAID}.
-     * </p>
+     * Initiates the payment process for a specific order.
+     * Verifies eligibility, dispatches a payment request message to RabbitMQ,
+     * and sets the order status to {@code PROCESSING}.
      *
-     * @param id the {@link UUID} of the order to pay
-     * @return the updated {@link OrderResponseDTO}
-     * @throws NotFoundException if the order is not found
-     * @throws PaymentFailedException if the order is already processed/paid, or if the external payment gateway is unreachable
+     * @param id the {@link UUID} of the order to pay for
+     * @return the updated {@link OrderResponseDTO} reflecting the {@code PROCESSING} status
+     * @throws NotFoundException if the order does not exist
+     * @throws PaymentFailedException if the order is already processed/paid, or if the RabbitMQ message dispatch fails
      */
     public OrderResponseDTO pay(UUID id) {
         Order order = orderRepository.findById(id)
@@ -124,37 +111,26 @@ public class OrderService {
             throw new PaymentFailedException("Order is already paid or currently being processed.");
         }
 
-        order.setStatus(StatusEnum.PROCESSING);
-        orderRepository.save(order);
-
         PaymentRequest request = new PaymentRequest(order.getId(), order.getTotal());
 
         try {
-            // Call Payment microservice
-            paymentRestClient.post()
-                    .uri("/payments")
-                    .body(request)
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (Exception e) {
-            // Fallback if the entire payment microservice is unreachable
-            order.setStatus(StatusEnum.UNPAID);
+            rabbitTemplate.convertAndSend("exchange-orders", "order.payment.request", request);
+            order.setStatus(StatusEnum.PROCESSING);
             orderRepository.save(order);
-            throw new PaymentFailedException("Payment gateway unreachable: " + e.getMessage());
+        } catch (Exception e) {
+            throw new PaymentFailedException("Could not enqueue payment request: " + e.getMessage());
         }
 
-        Order updatedOrder = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
-        return orderMapper.toResponseDTO(updatedOrder);
+        return orderMapper.toResponseDTO(order);
     }
 
     /**
      * Updates the description and total price of an existing order.
      *
-     * @param id  the {@link UUID} of the order to update
+     * @param id the {@link UUID} of the order to update
      * @param dto the {@link OrderRequestDTO} containing the updated information
-     * @return the {@link OrderResponseDTO} of the updated order
-     * @throws NotFoundException if the order to update is not found
+     * @return the updated {@link OrderResponseDTO}
+     * @throws NotFoundException if the order to be updated is not found
      */
     public OrderResponseDTO update(UUID id, OrderRequestDTO dto) {
         Order existingOrder = orderRepository.findById(id)
@@ -168,10 +144,10 @@ public class OrderService {
     }
 
     /**
-     * Performs a logical (soft) delete on an order by updating its status to {@link StatusEnum#DELETED}.
+     * Soft-deletes an order by updating its status to {@code DELETED}.
      *
-     * @param id the {@link UUID} of the order to soft-delete
-     * @throws NotFoundException if the order is not found
+     * @param id the {@link UUID} of the order to delete
+     * @throws NotFoundException if the order does not exist
      */
     public void delete(UUID id) {
         Order order = orderRepository.findById(id)
@@ -182,12 +158,13 @@ public class OrderService {
     }
 
     /**
-     * Updates an order's status based on an external signal or webhook (e.g., async payment updates).
+     * Updates the status of an order based on feedback received from an external system
+     * (e.g., asynchronous payment processors).
      *
-     * @param id        the {@link UUID} of the order to update
-     * @param newStatus the new {@link StatusEnum} to apply to the order
+     * @param id the {@link UUID} of the order to update
+     * @param newStatus the new {@link StatusEnum} to assign to the order
      * @return the updated {@link OrderResponseDTO}
-     * @throws NotFoundException if the order is not found
+     * @throws NotFoundException if the order does not exist
      */
     public OrderResponseDTO updateStatusFromExternal(UUID id, StatusEnum newStatus) {
         Order order = orderRepository.findById(id)
@@ -195,7 +172,6 @@ public class OrderService {
 
         order.setStatus(newStatus);
         Order updatedOrder = orderRepository.save(order);
-
         return orderMapper.toResponseDTO(updatedOrder);
     }
 }
