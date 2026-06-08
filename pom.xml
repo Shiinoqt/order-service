@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.its</groupId>
     <artifactId>gestioneordinirestclient</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.2-SNAPSHOT</version>
     <name>gestioneordinirestclient</name>
     <description>gestioneordinirestclient</description>
     <url/>
@@ -101,6 +101,10 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
     </dependencies>
     <build>
