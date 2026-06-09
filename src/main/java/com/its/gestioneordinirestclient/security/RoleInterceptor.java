@@ -25,10 +25,8 @@ public class RoleInterceptor implements HandlerInterceptor {
         if (!method.hasMethodAnnotation(RequiresAdmin.class)) return true;
 
         String rawHeader = request.getHeader(ROLES_HEADER);
-        System.out.println(">>> Auth-Roles raw value: [" + rawHeader + "]"); // brackets show hidden spaces
 
         List<String> roles = parseRoles(rawHeader);
-        System.out.println(">>> Parsed roles: " + roles);
 
         if (roles.contains(ROLE_ADMIN)) return true;
 
