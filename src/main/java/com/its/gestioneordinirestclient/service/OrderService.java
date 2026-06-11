@@ -11,6 +11,8 @@ import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.repository.OrderRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -27,6 +29,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository orderRepository;
     private final OrderMapper orderMapper;
@@ -91,6 +95,7 @@ public class OrderService {
                     .retrieve()
                     .body(new ParameterizedTypeReference<List<PaymentResponse>>() {});
         } catch (Exception e) {
+            log.error("Failed to retrieve payments for order {}", id, e);
             throw new PaymentFailedException("Failed to get payments for order " + id);
         }
     }
@@ -146,6 +151,7 @@ public class OrderService {
             order.setStatus(StatusEnum.PROCESSING);
             orderRepository.save(order);
         } catch (Exception e) {
+            log.error("Failed to enqueue payment request for order {}", id, e);
             throw new PaymentFailedException("Could not enqueue payment request: " + e.getMessage());
         }
 
