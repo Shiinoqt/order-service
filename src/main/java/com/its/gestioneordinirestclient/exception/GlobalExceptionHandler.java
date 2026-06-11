@@ -38,4 +38,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handleGeneric(Exception e) {
         return ResponseEntity.status(500).body("An unexpected error occurred");
     }
+
+    // Catches missing headers
+    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
+    public ResponseEntity<String> handleMissingHeader(org.springframework.web.bind.MissingRequestHeaderException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body("Missing required header: " + e.getHeaderName());
+    }
 }

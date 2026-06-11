@@ -1,8 +1,13 @@
 package com.its.gestioneordinirestclient.config;
 
-import org.springframework.amqp.core.*;
+import org.springframework.amqp.core.AmqpAdmin;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.DirectExchange;
+import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
@@ -10,71 +15,77 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Configuration class for setting up RabbitMQ messaging infrastructure.
- * <p>
- * This class defines the necessary AMQP components including exchanges, queues,
- * routing bindings, and serialization mechanisms (JSON) needed to enable
- * asynchronous communication for order processing and payment results.
- * </p>
+ * RabbitMQ topology for the order service.
+ *
+ * <p>This service publishes payment requests and consumes payment result events.</p>
  */
 @Configuration
 public class RabbitMQConfig {
 
+    public static final String ORDERS_EXCHANGE = "exchange-orders";
+    public static final String PAYMENT_REQUEST_ROUTING_KEY = "order.payment.request";
+
+    public static final String PAYMENT_RESULTS_QUEUE = "queue-payment-results";
+    public static final String PAYMENT_RESULTS_EXCHANGE = "exchange-payment-results";
+    public static final String PAYMENT_RESULTS_ROUTING_KEY = "payment.status.updated";
+
     /**
-     * Declares the direct exchange used to dispatch outgoing order requests
-     * (such as payment processing requests) originating from this service.
+     * Exchange used to publish payment requests from the order service.
      *
-     * @return a {@link DirectExchange} named "exchange-orders"
+     * @return direct exchange for order-driven payment requests
      */
     @Bean
     public DirectExchange ordersExchange() {
-        return new DirectExchange("exchange-orders");
+        return new DirectExchange(ORDERS_EXCHANGE);
     }
 
     /**
-     * Declares a durable queue dedicated to receiving payment result messages
-     * sent from the external payment system.
+     * Queue that receives payment result events for order updates.
      *
-     * @return a durable {@link Queue} named "queue-payment-results"
+     * @return durable payment results queue
      */
     @Bean
     public Queue paymentResultsQueue() {
-        return new Queue("queue-payment-results", true); // durable = true
+        return new Queue(PAYMENT_RESULTS_QUEUE, true);
     }
 
     /**
-     * Declare the results exchange here too so the topology exists regardless
-     * of which service starts first. RabbitMQ is idempotent on declarations.
+     * Exchange used by the payment service to publish payment results.
      *
-     * @return a {@link DirectExchange} named "exchange-payment-results"
+     * @return direct exchange for payment result events
      */
     @Bean
     public DirectExchange paymentResultsExchange() {
-        return new DirectExchange("exchange-payment-results");
+        return new DirectExchange(PAYMENT_RESULTS_EXCHANGE);
     }
 
     /**
-     * Binds the payment results queue to the payment results exchange using a
-     * specific routing key. This ensures messages routed with "payment.status.updated"
-     * land safely in the results queue.
+     * Binding that routes payment result events into the order service queue.
      *
-     * @param paymentResultsQueue the queue to bind
-     * @param paymentResultsExchange the direct exchange to bind to
-     * @return a {@link Binding} defining the relationship between the queue and exchange
+     * @return binding between payment results exchange and order results queue
      */
     @Bean
-    public Binding paymentResultsBinding(Queue paymentResultsQueue,
-                                         DirectExchange paymentResultsExchange) {
-        return BindingBuilder.bind(paymentResultsQueue)
-                .to(paymentResultsExchange)
-                .with("payment.status.updated");
+    public Binding paymentResultsBinding() {
+        return BindingBuilder.bind(paymentResultsQueue())
+                .to(paymentResultsExchange())
+                .with(PAYMENT_RESULTS_ROUTING_KEY);
     }
 
     /**
-     * Configures a message converter that utilizes Jackson to automatically
-     * serialize and deserialize Java object payloads to and from JSON format.
+     * AMQP admin used to declare broker resources at startup.
      *
-     * @return a {@link MessageConverter} backed by Jackson
+     * @param connectionFactory RabbitMQ connection factory
+     * @return admin bean
+     */
+    @Bean
+    public AmqpAdmin amqpAdmin(ConnectionFactory connectionFactory) {
+        return new RabbitAdmin(connectionFactory);
+    }
+
+    /**
+     * JSON converter used for object serialization and deserialization.
+     *
+     * @return Jackson-based message converter
      */
     @Bean
     public MessageConverter jsonMessageConverter() {
@@ -82,12 +93,11 @@ public class RabbitMQConfig {
     }
 
     /**
-     * Configures and prepares the {@link RabbitTemplate} used for publishing messages.
-     * Applies the custom JSON message converter to ensure standardized payload formats.
+     * RabbitTemplate configured for JSON payload publishing.
      *
-     * @param connectionFactory the underlying AMQP {@link ConnectionFactory}
-     * @param jsonMessageConverter the strategy to use for converting messages
-     * @return a fully configured {@link RabbitTemplate} instance
+     * @param connectionFactory RabbitMQ connection factory
+     * @param jsonMessageConverter JSON converter
+     * @return configured RabbitTemplate
      */
     @Bean
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory,
@@ -98,13 +108,11 @@ public class RabbitMQConfig {
     }
 
     /**
-     * Configures the container factory responsible for managing the lifecycle of
-     * asynchronous message listeners (e.g., methods annotated with {@code @RabbitListener}).
-     * Sets up the proper connection factory and message converter requirements.
+     * Listener container factory configured with the shared JSON converter.
      *
-     * @param connectionFactory the underlying AMQP {@link ConnectionFactory}
-     * @param jsonMessageConverter the strategy to use for deserializing incoming payloads
-     * @return a {@link SimpleRabbitListenerContainerFactory} instance
+     * @param connectionFactory RabbitMQ connection factory
+     * @param jsonMessageConverter JSON converter
+     * @return listener container factory
      */
     @Bean
     public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(

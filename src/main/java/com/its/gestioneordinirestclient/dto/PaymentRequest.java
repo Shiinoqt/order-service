@@ -12,5 +12,6 @@ import java.util.UUID;
 @Builder
 public class PaymentRequest{
     private UUID orderId;
+    private String email;
     private BigDecimal amount;
 }

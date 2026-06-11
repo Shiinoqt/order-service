@@ -32,4 +32,6 @@ public class Order {
     private StatusEnum status;
 
     private BigDecimal total;
+
+    private String customerEmail;
 }

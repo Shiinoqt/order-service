@@ -15,44 +15,90 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * REST endpoints for order operations.
+ */
 @RestController
 @RequestMapping("/orders")
 @RequiredArgsConstructor
 public class OrderController {
+
     private final OrderService orderService;
 
+    /**
+     * Returns one order visible to the authenticated user.
+     *
+     * @param id order identifier
+     * @param email authenticated user email from gateway header
+     * @return requested order
+     */
     @GetMapping(path = "/{id}", produces = "application/json")
-    public ResponseEntity<OrderResponseDTO> getOrderById(@PathVariable UUID id) {
-        OrderResponseDTO response = orderService.getById(id);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<OrderResponseDTO> getOrderById(
+            @PathVariable UUID id,
+            @RequestHeader(value = "Auth-Email", required = false) String email) {
+        return ResponseEntity.ok(orderService.getById(id, email));
     }
 
+    /**
+     * Returns all orders for administrators.
+     *
+     * @return all orders
+     */
     @RequiresAdmin
     @GetMapping
     public ResponseEntity<List<OrderResponseDTO>> getAllOrders() {
-        List<OrderResponseDTO> response = orderService.getAll();
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(orderService.getAll());
     }
 
+    /**
+     * Creates a new order for the authenticated user.
+     *
+     * @param orderRequestDTO order payload
+     * @param email authenticated user email from gateway header
+     * @return created order
+     */
     @PostMapping(path = "/create", consumes = "application/json", produces = "application/json")
-    public ResponseEntity<OrderResponseDTO> createOrder(@Valid @RequestBody OrderRequestDTO orderRequestDTO) {
-        OrderResponseDTO response = orderService.create(orderRequestDTO);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    public ResponseEntity<OrderResponseDTO> createOrder(
+            @Valid @RequestBody OrderRequestDTO orderRequestDTO,
+            @RequestHeader(value = "Auth-Email", required = false) String email) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.create(orderRequestDTO, email));
     }
 
+    /**
+     * Starts payment for an order visible to the authenticated user.
+     *
+     * @param id order identifier
+     * @param email authenticated user email from gateway header
+     * @return updated order
+     */
     @PostMapping(path = "/pay/{id}", produces = "application/json")
-    public ResponseEntity<OrderResponseDTO> payOrder(@PathVariable UUID id) {
-        OrderResponseDTO response = orderService.pay(id);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<OrderResponseDTO> payOrder(
+            @PathVariable UUID id,
+            @RequestHeader(value = "Auth-Email", required = false) String email) {
+        return ResponseEntity.ok(orderService.pay(id, email));
     }
 
+    /**
+     * Updates an order.
+     *
+     * @param id order identifier
+     * @param orderRequestDTO updated payload
+     * @return updated order
+     */
     @RequiresAdmin
     @PutMapping(path = "/{id}", consumes = "application/json", produces = "application/json")
-    public ResponseEntity<OrderResponseDTO> updateOrder(@PathVariable UUID id, @Valid @RequestBody OrderRequestDTO orderRequestDTO) {
-        OrderResponseDTO response = orderService.update(id, orderRequestDTO);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<OrderResponseDTO> updateOrder(
+            @PathVariable UUID id,
+            @Valid @RequestBody OrderRequestDTO orderRequestDTO) {
+        return ResponseEntity.ok(orderService.update(id, orderRequestDTO));
     }
 
+    /**
+     * Soft-deletes an order.
+     *
+     * @param id order identifier
+     * @return empty response
+     */
     @RequiresAdmin
     @DeleteMapping(path = "/{id}")
     public ResponseEntity<Void> deleteOrder(@PathVariable UUID id) {
@@ -60,19 +106,30 @@ public class OrderController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Updates an order status from an external process.
+     *
+     * @param id order identifier
+     * @param status new status
+     * @return updated order
+     */
     @RequiresAdmin
     @PutMapping(path = "/status/{id}")
     public ResponseEntity<OrderResponseDTO> updateOrderStatusExternal(
             @PathVariable UUID id,
             @RequestParam StatusEnum status) {
-
-        OrderResponseDTO response = orderService.updateStatusFromExternal(id, status);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(orderService.updateStatusFromExternal(id, status));
     }
 
+    /**
+     * Returns payments linked to one order.
+     *
+     * @param id order identifier
+     * @return payment list
+     */
+    @RequiresAdmin
     @GetMapping(path = "/payments/{id}", produces = "application/json")
     public ResponseEntity<List<PaymentResponse>> getPaymentsByOrderId(@PathVariable UUID id) {
-        List<PaymentResponse> response = orderService.getPayments(id);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(orderService.getPayments(id));
     }
 }

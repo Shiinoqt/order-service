@@ -1,16 +1,18 @@
 package com.its.gestioneordinirestclient.service;
 
+import com.its.gestioneordinirestclient.config.RabbitMQConfig;
 import com.its.gestioneordinirestclient.dto.PaymentResponse;
+import com.its.gestioneordinirestclient.model.PaymentStatusEnum;
 import com.its.gestioneordinirestclient.model.StatusEnum;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Message listener component responsible for consuming and processing asynchronous messages
- * from RabbitMQ queues. It acts as the event-driven bridge between external payment systems
- * and the internal order domain application logic.
+ * Consumes payment result events and updates order status.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class OrderListener {
@@ -18,21 +20,25 @@ public class OrderListener {
     private final OrderService orderService;
 
     /**
-     * Listens to the {@code queue-payment-results} queue to process asynchronous payment outcomes.
-     * <p>
-     * If the payment status is {@code "ACCEPTED"}, the associated order status is updated to
-     * {@link StatusEnum#PAID}. For any other status outcome, the order reverts or stays as
-     * {@link StatusEnum#UNPAID}.
-     * </p>
+     * Updates the related order when a payment result is received.
      *
-     * @param response the {@link PaymentResponse} payload containing the order ID and payment status details
+     * @param response payment result payload
      */
-    @RabbitListener(queues = "queue-payment-results")
+    @RabbitListener(queues = RabbitMQConfig.PAYMENT_RESULTS_QUEUE)
     public void handlePaymentResult(PaymentResponse response) {
-        if ("ACCEPTED".equals(response.getStatus())) {
+        log.info("Received payment result: orderId={}, status={}", response.getOrderId(), response.getStatus());
+
+        if (response.getOrderId() == null || response.getStatus() == null) {
+            log.error("Invalid payment result payload: {}", response);
+            return;
+        }
+
+        if (response.getStatus() == PaymentStatusEnum.ACCEPTED) {
             orderService.updateStatusFromExternal(response.getOrderId(), StatusEnum.PAID);
         } else {
             orderService.updateStatusFromExternal(response.getOrderId(), StatusEnum.UNPAID);
         }
+
+        log.info("Order status updated for orderId={}", response.getOrderId());
     }
 }

@@ -1,28 +1,28 @@
 package com.its.gestioneordinirestclient.service;
 
-import com.its.gestioneordinirestclient.dto.OrderRequestDTO;
-import com.its.gestioneordinirestclient.dto.OrderResponseDTO;
-import com.its.gestioneordinirestclient.dto.PaymentRequest;
-import com.its.gestioneordinirestclient.dto.PaymentResponse;
+import com.its.gestioneordinirestclient.dto.*;
+import com.its.gestioneordinirestclient.exception.AccessDeniedException;
+import com.its.gestioneordinirestclient.exception.BadRequestException;
 import com.its.gestioneordinirestclient.exception.NotFoundException;
 import com.its.gestioneordinirestclient.exception.PaymentFailedException;
 import com.its.gestioneordinirestclient.mapper.OrderMapper;
 import com.its.gestioneordinirestclient.model.Order;
 import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.repository.OrderRepository;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Service class responsible for managing business logic related to orders.
- * It provides operations for creating, retrieving, updating, and soft-deleting orders,
- * as well as interacting with external payment services via REST and RabbitMQ message queues.
+ * Business logic for orders.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,23 +33,43 @@ public class OrderService {
     private final RestClient paymentRestClient;
     private final RabbitTemplate rabbitTemplate;
 
+    @Value("${admin.email}")
+    private String adminEmail;
+
+    private String requireEmail(String email) {
+        if (!StringUtils.hasText(email)) {
+            throw new BadRequestException("Missing Auth-Email header");
+        }
+        return email.trim();
+    }
+
     /**
-     * Retrieves an order by its unique identifier.
+     * Returns one order if the caller is the owner or an admin.
      *
-     * @param id the {@link UUID} of the order to retrieve
-     * @return the {@link OrderResponseDTO} containing the order details
-     * @throws NotFoundException if no order is found with the given ID
+     * @param id order identifier
+     * @param email authenticated user email
+     * @return order response
      */
-    public OrderResponseDTO getById(UUID id) {
+    public OrderResponseDTO getById(UUID id, String email) {
+        String safeEmail = requireEmail(email);
+
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
+
+        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isOwner = safeEmail.equals(order.getCustomerEmail());
+
+        if (!isAdmin && !isOwner) {
+            throw new AccessDeniedException("You can only access your own orders");
+        }
+
         return orderMapper.toResponseDTO(order);
     }
 
     /**
-     * Retrieves all existing orders in the system.
+     * Returns all orders.
      *
-     * @return a {@link List} of {@link OrderResponseDTO}s
+     * @return order list
      */
     public List<OrderResponseDTO> getAll() {
         return orderRepository.findAll()
@@ -59,11 +79,10 @@ public class OrderService {
     }
 
     /**
-     * Fetches the payment history for a specific order from an external REST service.
+     * Returns payments for one order.
      *
-     * @param id the {@link UUID} of the order whose payments are to be retrieved
-     * @return a {@link List} of {@link PaymentResponse}s associated with the order
-     * @throws PaymentFailedException if the external REST call fails or encounters an error
+     * @param id order identifier
+     * @return payment list
      */
     public List<PaymentResponse> getPayments(UUID id) {
         try {
@@ -77,41 +96,50 @@ public class OrderService {
     }
 
     /**
-     * Creates and saves a new order with an initial status of {@code UNPAID}.
+     * Creates a new unpaid order for the authenticated user.
      *
-     * @param dto the {@link OrderRequestDTO} containing the details of the order to create
-     * @return the {@link OrderResponseDTO} representing the newly created order
+     * @param dto order payload
+     * @param email authenticated user email
+     * @return created order
      */
-    public OrderResponseDTO create(OrderRequestDTO dto) {
+    public OrderResponseDTO create(OrderRequestDTO dto, String email) {
+        String safeEmail = requireEmail(email);
+
         Order order = Order.builder()
                 .description(dto.getDescription())
+                .customerEmail(safeEmail)
                 .status(StatusEnum.UNPAID)
                 .total(dto.getTotal())
                 .build();
 
-        Order savedOrder = orderRepository.save(order);
-        return orderMapper.toResponseDTO(savedOrder);
+        return orderMapper.toResponseDTO(orderRepository.save(order));
     }
 
     /**
-     * Initiates the payment process for a specific order.
-     * Verifies eligibility, dispatches a payment request message to RabbitMQ,
-     * and sets the order status to {@code PROCESSING}.
+     * Sends a payment request for an order.
      *
-     * @param id the {@link UUID} of the order to pay for
-     * @return the updated {@link OrderResponseDTO} reflecting the {@code PROCESSING} status
-     * @throws NotFoundException if the order does not exist
-     * @throws PaymentFailedException if the order is already processed/paid, or if the RabbitMQ message dispatch fails
+     * @param id order identifier
+     * @param email authenticated user email
+     * @return updated order
      */
-    public OrderResponseDTO pay(UUID id) {
+    public OrderResponseDTO pay(UUID id, String email) {
+        String safeEmail = requireEmail(email);
+
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
+
+        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isOwner = safeEmail.equals(order.getCustomerEmail());
+
+        if (!isAdmin && !isOwner) {
+            throw new AccessDeniedException("You can only access your own orders");
+        }
 
         if (StatusEnum.PAID.equals(order.getStatus()) || StatusEnum.PROCESSING.equals(order.getStatus())) {
             throw new PaymentFailedException("Order is already paid or currently being processed.");
         }
 
-        PaymentRequest request = new PaymentRequest(order.getId(), order.getTotal());
+        PaymentRequest request = new PaymentRequest(order.getId(), order.getCustomerEmail(), order.getTotal());
 
         try {
             rabbitTemplate.convertAndSend("exchange-orders", "order.payment.request", request);
@@ -125,12 +153,11 @@ public class OrderService {
     }
 
     /**
-     * Updates the description and total price of an existing order.
+     * Updates order fields.
      *
-     * @param id the {@link UUID} of the order to update
-     * @param dto the {@link OrderRequestDTO} containing the updated information
-     * @return the updated {@link OrderResponseDTO}
-     * @throws NotFoundException if the order to be updated is not found
+     * @param id order identifier
+     * @param dto updated payload
+     * @return updated order
      */
     public OrderResponseDTO update(UUID id, OrderRequestDTO dto) {
         Order existingOrder = orderRepository.findById(id)
@@ -139,15 +166,13 @@ public class OrderService {
         existingOrder.setDescription(dto.getDescription());
         existingOrder.setTotal(dto.getTotal());
 
-        Order updatedOrder = orderRepository.save(existingOrder);
-        return orderMapper.toResponseDTO(updatedOrder);
+        return orderMapper.toResponseDTO(orderRepository.save(existingOrder));
     }
 
     /**
-     * Soft-deletes an order by updating its status to {@code DELETED}.
+     * Marks an order as deleted.
      *
-     * @param id the {@link UUID} of the order to delete
-     * @throws NotFoundException if the order does not exist
+     * @param id order identifier
      */
     public void delete(UUID id) {
         Order order = orderRepository.findById(id)
@@ -158,20 +183,19 @@ public class OrderService {
     }
 
     /**
-     * Updates the status of an order based on feedback received from an external system
-     * (e.g., asynchronous payment processors).
+     * Updates order status from an external event.
      *
-     * @param id the {@link UUID} of the order to update
-     * @param newStatus the new {@link StatusEnum} to assign to the order
-     * @return the updated {@link OrderResponseDTO}
-     * @throws NotFoundException if the order does not exist
+     * @param id order identifier
+     * @param newStatus new order status
+     * @return updated order
      */
+    @Transactional
     public OrderResponseDTO updateStatusFromExternal(UUID id, StatusEnum newStatus) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
 
         order.setStatus(newStatus);
-        Order updatedOrder = orderRepository.save(order);
-        return orderMapper.toResponseDTO(updatedOrder);
+        orderRepository.save(order);
+        return orderMapper.toResponseDTO(order);
     }
 }
