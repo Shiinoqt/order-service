@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,12 +40,27 @@ public class OrderService {
 
     @Value("${admin.email}")
     private String adminEmail;
+    private static final String ROLE_ADMIN = "ROLE_ADMIN";
 
     private String requireEmail(String email) {
         if (!StringUtils.hasText(email)) {
             throw new BadRequestException("Missing Auth-Email header");
         }
         return email.trim();
+    }
+
+    private List<String> parseRoles(String rolesHeader) {
+        if (!StringUtils.hasText(rolesHeader)) {
+            return List.of();
+        }
+        return Arrays.stream(rolesHeader.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    private boolean isAdmin(String rolesHeader) {
+        return parseRoles(rolesHeader).contains(ROLE_ADMIN);
     }
 
     /**
@@ -54,13 +70,12 @@ public class OrderService {
      * @param email authenticated user email
      * @return order response
      */
-    public OrderResponseDTO getById(UUID id, String email) {
+    public OrderResponseDTO getById(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
-        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isAdmin = isAdmin(rolesHeader);
         boolean isOwner = safeEmail.equals(order.getCustomerEmail());
 
         if (!isAdmin && !isOwner) {
@@ -127,13 +142,12 @@ public class OrderService {
      * @param email authenticated user email
      * @return updated order
      */
-    public OrderResponseDTO pay(UUID id, String email) {
+    public OrderResponseDTO pay(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
 
-        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isAdmin = isAdmin(rolesHeader);
         boolean isOwner = safeEmail.equals(order.getCustomerEmail());
 
         if (!isAdmin && !isOwner) {
