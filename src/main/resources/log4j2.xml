@@ -1,39 +1,75 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Configuration status="WARN" monitorInterval="30">
+<Configuration status="WARN"
+               monitorInterval="30"
+               packages="pl.tkowalcz.tjahzi.log4j2">
 
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} [%X{correlationId}] [%X{caller}] [%X{method} %X{uri}] - %msg%n"/>
         </Console>
 
-        <RollingFile name="File" fileName="logs/app.log"
+        <RollingFile name="File"
+                     fileName="logs/app.log"
                      filePattern="logs/app-%d{yyyy-MM-dd}-%i.log.gz">
-            <PatternLayout pattern="%d [%t] %-5level %logger{36} [%X{correlationId}] [%X{caller}] [%X{method} %X{uri}] - %msg%n"/>
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} [%X{correlationId}] [%X{caller}] [%X{method} %X{uri}] - %msg%n"/>
             <Policies>
                 <SizeBasedTriggeringPolicy size="50MB"/>
             </Policies>
             <DefaultRolloverStrategy max="30"/>
         </RollingFile>
+
+        <Loki name="Loki"
+              bufferSizeMegabytes="16"
+              batchWait="5">
+            <host>loki</host>
+            <port>3100</port>
+            <logEndpoint>/loki/api/v1/push</logEndpoint>
+            <useSSL>false</useSSL>
+
+            <PatternLayout>
+                <Pattern>
+                    %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36}
+                    [corr=%X{correlationId}] [caller=%X{caller}] [method=%X{method}] [uri=%X{uri}]
+                    - %msg%n%throwable
+                </Pattern>
+            </PatternLayout>
+
+            <!-- Keep labels low-cardinality -->
+            <Label name="app" value="gestioneordini-rest-client"/>
+            <Label name="env" value="dev"/>
+            <LogLevelLabel>level</LogLevelLabel>
+        </Loki>
     </Appenders>
 
     <Loggers>
         <Logger name="com.its.gestioneordinirestclient" level="debug" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
+            <AppenderRef ref="Loki"/>
         </Logger>
 
         <Logger name="com.its.gestioneordinirestclient.service" level="info" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
+            <AppenderRef ref="Loki"/>
         </Logger>
 
-        <Logger name="org.springframework" level="info"/>
-        <Logger name="org.hibernate" level="warn"/>
-        <Logger name="io.netty" level="warn"/>
+        <Logger name="org.springframework" level="info">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="Loki"/>
+        </Logger>
+
+        <Logger name="org.hibernate" level="warn">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+            <AppenderRef ref="Loki"/>
+        </Logger>
 
         <Root level="info">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
+            <AppenderRef ref="Loki"/>
         </Root>
     </Loggers>
 
