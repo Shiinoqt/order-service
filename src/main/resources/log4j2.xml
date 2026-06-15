@@ -18,13 +18,13 @@
 
     <Loggers>
         <!-- Order service code -->
-        <Logger name="com.its.order" level="debug" additivity="false">
+        <Logger name="com.its.gestioneordinirestclient" level="debug" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
         </Logger>
 
         <!-- Business events: INFO level -->
-        <Logger name="com.its.order.business" level="info" additivity="false">
+        <Logger name="com.its.gestioneordinirestclient.service" level="info" additivity="false">
             <AppenderRef ref="Console"/>
             <AppenderRef ref="File"/>
         </Logger>

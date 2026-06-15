@@ -11,6 +11,8 @@ import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.repository.OrderRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,6 +31,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OrderService {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
+
     private final OrderRepository orderRepository;
     private final OrderMapper orderMapper;
     private final RestClient paymentRestClient;
@@ -35,12 +40,27 @@ public class OrderService {
 
     @Value("${admin.email}")
     private String adminEmail;
+    private static final String ROLE_ADMIN = "ROLE_ADMIN";
 
     private String requireEmail(String email) {
         if (!StringUtils.hasText(email)) {
             throw new BadRequestException("Missing Auth-Email header");
         }
         return email.trim();
+    }
+
+    private List<String> parseRoles(String rolesHeader) {
+        if (!StringUtils.hasText(rolesHeader)) {
+            return List.of();
+        }
+        return Arrays.stream(rolesHeader.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    private boolean isAdmin(String rolesHeader) {
+        return parseRoles(rolesHeader).contains(ROLE_ADMIN);
     }
 
     /**
@@ -50,13 +70,12 @@ public class OrderService {
      * @param email authenticated user email
      * @return order response
      */
-    public OrderResponseDTO getById(UUID id, String email) {
+    public OrderResponseDTO getById(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found"));
 
-        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isAdmin = isAdmin(rolesHeader);
         boolean isOwner = safeEmail.equals(order.getCustomerEmail());
 
         if (!isAdmin && !isOwner) {
@@ -91,6 +110,7 @@ public class OrderService {
                     .retrieve()
                     .body(new ParameterizedTypeReference<List<PaymentResponse>>() {});
         } catch (Exception e) {
+            log.error("Failed to retrieve payments for order {}", id, e);
             throw new PaymentFailedException("Failed to get payments for order " + id);
         }
     }
@@ -122,13 +142,12 @@ public class OrderService {
      * @param email authenticated user email
      * @return updated order
      */
-    public OrderResponseDTO pay(UUID id, String email) {
+    public OrderResponseDTO pay(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
 
-        boolean isAdmin = adminEmail.equals(safeEmail);
+        boolean isAdmin = isAdmin(rolesHeader);
         boolean isOwner = safeEmail.equals(order.getCustomerEmail());
 
         if (!isAdmin && !isOwner) {
@@ -146,6 +165,7 @@ public class OrderService {
             order.setStatus(StatusEnum.PROCESSING);
             orderRepository.save(order);
         } catch (Exception e) {
+            log.error("Failed to enqueue payment request for order {}", id, e);
             throw new PaymentFailedException("Could not enqueue payment request: " + e.getMessage());
         }
 

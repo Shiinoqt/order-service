@@ -35,8 +35,9 @@ public class OrderController {
     @GetMapping(path = "/{id}", produces = "application/json")
     public ResponseEntity<OrderResponseDTO> getOrderById(
             @PathVariable UUID id,
-            @RequestHeader(value = "Auth-Email", required = false) String email) {
-        return ResponseEntity.ok(orderService.getById(id, email));
+            @RequestHeader(value = "Auth-Email", required = false) String email,
+            @RequestHeader(value = "Auth-Roles", required = false) String rolesHeader) {
+        return ResponseEntity.ok(orderService.getById(id, email, rolesHeader));
     }
 
     /**
@@ -74,8 +75,9 @@ public class OrderController {
     @PostMapping(path = "/pay/{id}", produces = "application/json")
     public ResponseEntity<OrderResponseDTO> payOrder(
             @PathVariable UUID id,
-            @RequestHeader(value = "Auth-Email", required = false) String email) {
-        return ResponseEntity.ok(orderService.pay(id, email));
+            @RequestHeader(value = "Auth-Email", required = false) String email,
+            @RequestHeader(value = "Auth-Roles", required = false) String rolesHeader) {
+        return ResponseEntity.ok(orderService.pay(id, email, rolesHeader));
     }
 
     /**
