@@ -36,7 +36,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderMapper orderMapper;
     private final RestClient paymentRestClient;
-    private final RabbitTemplate rabbitTemplate;
+    private final PaymentRequestPublisher paymentRequestPublisher;
 
     @Value("${admin.email}")
     private String adminEmail;
@@ -63,6 +63,26 @@ public class OrderService {
         return parseRoles(rolesHeader).contains(ROLE_ADMIN);
     }
 
+    private Order loadAllowedOrder(UUID id, String email, String rolesHeader) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
+
+        boolean isAdmin = isAdmin(rolesHeader);
+        boolean isOwner = email.equals(order.getCustomerEmail());
+
+        if (!isAdmin && !isOwner) {
+            throw new AccessDeniedException("You can only access your own orders");
+        }
+
+        return order;
+    }
+
+    private void ensurePayable(Order order) {
+        if (StatusEnum.PAID.equals(order.getStatus()) || StatusEnum.PROCESSING.equals(order.getStatus())) {
+            throw new PaymentFailedException("Order is already paid or currently being processed.");
+        }
+    }
+
     /**
      * Returns one order if the caller is the owner or an admin.
      *
@@ -72,15 +92,7 @@ public class OrderService {
      */
     public OrderResponseDTO getById(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-        Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Order not found"));
-
-        boolean isAdmin = isAdmin(rolesHeader);
-        boolean isOwner = safeEmail.equals(order.getCustomerEmail());
-
-        if (!isAdmin && !isOwner) {
-            throw new AccessDeniedException("You can only access your own orders");
-        }
+        Order order = loadAllowedOrder(id, safeEmail, rolesHeader);
 
         return orderMapper.toResponseDTO(order);
     }
@@ -144,26 +156,22 @@ public class OrderService {
      */
     public OrderResponseDTO pay(UUID id, String email, String rolesHeader) {
         String safeEmail = requireEmail(email);
-        Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Order not found with id: " + id));
+        Order order = loadAllowedOrder(id, safeEmail, rolesHeader);
+        ensurePayable(order);
 
-        boolean isAdmin = isAdmin(rolesHeader);
-        boolean isOwner = safeEmail.equals(order.getCustomerEmail());
-
-        if (!isAdmin && !isOwner) {
-            throw new AccessDeniedException("You can only access your own orders");
-        }
-
-        if (StatusEnum.PAID.equals(order.getStatus()) || StatusEnum.PROCESSING.equals(order.getStatus())) {
-            throw new PaymentFailedException("Order is already paid or currently being processed.");
-        }
-
-        PaymentRequest request = new PaymentRequest(order.getId(), order.getCustomerEmail(), order.getTotal());
+        PaymentRequest request = new PaymentRequest(
+                order.getId(),
+                order.getCustomerEmail(),
+                order.getTotal()
+        );
 
         try {
-            rabbitTemplate.convertAndSend("exchange-orders", "order.payment.request", request);
+            paymentRequestPublisher.publish(request);
             order.setStatus(StatusEnum.PROCESSING);
             orderRepository.save(order);
+
+            log.info("event=payment_request_enqueued orderId={} newStatus={}",
+                    order.getId(), order.getStatus());
         } catch (Exception e) {
             log.error("Failed to enqueue payment request for order {}", id, e);
             throw new PaymentFailedException("Could not enqueue payment request: " + e.getMessage());
