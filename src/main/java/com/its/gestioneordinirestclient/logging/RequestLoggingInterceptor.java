@@ -20,6 +20,7 @@ public class RequestLoggingInterceptor implements HandlerInterceptor {
 
         String correlationId = request.getHeader("X-Correlation-Id");
         if (correlationId == null) correlationId = java.util.UUID.randomUUID().toString();
+        response.setHeader("X-Correlation-Id", correlationId);
 
         // Who called: prefer authenticated user, fallback to IP
         String caller = request.getHeader("Auth-User-Id");         // set by gateway
