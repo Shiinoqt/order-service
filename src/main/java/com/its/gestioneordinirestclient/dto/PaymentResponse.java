@@ -20,4 +20,5 @@ public class PaymentResponse {
     private String email;
     private BigDecimal amount;
     private PaymentStatusEnum status;
+    private String receipt;
 }

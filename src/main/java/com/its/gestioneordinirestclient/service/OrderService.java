@@ -13,7 +13,6 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
@@ -102,9 +101,14 @@ public class OrderService {
      *
      * @return order list
      */
-    public List<OrderResponseDTO> getAll() {
-        return orderRepository.findAll()
-                .stream()
+    public List<OrderResponseDTO> getAll(String email, String rolesHeader) {
+        String safeEmail = requireEmail(email);
+
+        List<Order> orders = isAdmin(rolesHeader)
+                ? orderRepository.findAll()
+                : orderRepository.findByCustomerEmail(safeEmail);
+
+        return orders.stream()
                 .map(orderMapper::toResponseDTO)
                 .toList();
     }

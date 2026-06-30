@@ -45,10 +45,11 @@ public class OrderController {
      *
      * @return all orders
      */
-    @RequiresAdmin
     @GetMapping
-    public ResponseEntity<List<OrderResponseDTO>> getAllOrders() {
-        return ResponseEntity.ok(orderService.getAll());
+    public ResponseEntity<List<OrderResponseDTO>> getAllOrders(
+            @RequestHeader(value = "Auth-Email", required = false) String email,
+            @RequestHeader(value = "Auth-Roles", required = false) String rolesHeader) {
+        return ResponseEntity.ok(orderService.getAll(email, rolesHeader));
     }
 
     /**
@@ -129,7 +130,6 @@ public class OrderController {
      * @param id order identifier
      * @return payment list
      */
-    @RequiresAdmin
     @GetMapping(path = "/payments/{id}", produces = "application/json")
     public ResponseEntity<List<PaymentResponse>> getPaymentsByOrderId(@PathVariable UUID id) {
         return ResponseEntity.ok(orderService.getPayments(id));
