@@ -9,8 +9,10 @@ import com.its.gestioneordinirestclient.service.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -79,6 +81,15 @@ public class OrderController {
             @RequestHeader(value = "Auth-Email", required = false) String email,
             @RequestHeader(value = "Auth-Roles", required = false) String rolesHeader) {
         return ResponseEntity.ok(orderService.pay(id, email, rolesHeader));
+    }
+
+    @PostMapping(path = "/payCheck/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<OrderResponseDTO> payOrderCheck(
+            @PathVariable UUID id,
+            @RequestHeader(value = "Auth-Email", required = false) String email,
+            @RequestHeader(value = "Auth-Roles", required = false) String rolesHeader,
+            @RequestPart("file") MultipartFile file) {
+        return ResponseEntity.ok(orderService.payCheck(id, email, rolesHeader, file));
     }
 
     /**

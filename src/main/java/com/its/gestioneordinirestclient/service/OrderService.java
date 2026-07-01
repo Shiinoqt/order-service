@@ -7,6 +7,7 @@ import com.its.gestioneordinirestclient.exception.NotFoundException;
 import com.its.gestioneordinirestclient.exception.PaymentFailedException;
 import com.its.gestioneordinirestclient.mapper.OrderMapper;
 import com.its.gestioneordinirestclient.model.Order;
+import com.its.gestioneordinirestclient.model.PaymentStatusEnum;
 import com.its.gestioneordinirestclient.model.StatusEnum;
 import com.its.gestioneordinirestclient.repository.OrderRepository;
 import jakarta.transaction.Transactional;
@@ -15,10 +16,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -182,6 +191,60 @@ public class OrderService {
         }
 
         return orderMapper.toResponseDTO(order);
+    }
+
+    public OrderResponseDTO payCheck(UUID id, String email, String rolesHeader, MultipartFile file) {
+        String safeEmail = requireEmail(email);
+        Order order = loadAllowedOrder(id, safeEmail, rolesHeader);
+        ensurePayable(order);
+
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("Check file is required");
+        }
+
+        PaymentRequest request = new PaymentRequest(order.getId(), order.getCustomerEmail(), order.getTotal());
+
+        try {
+            HttpHeaders paymentPartHeaders = new HttpHeaders();
+            paymentPartHeaders.setContentType(MediaType.APPLICATION_JSON);
+
+            ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename();
+                }
+            };
+
+            HttpHeaders filePartHeaders = new HttpHeaders();
+            filePartHeaders.setContentType(MediaType.APPLICATION_PDF);
+
+            MultiValueMap<String, Object> multipartBody = new LinkedMultiValueMap<>();
+            multipartBody.add("payment", new HttpEntity<>(request, paymentPartHeaders));
+            multipartBody.add("file", new HttpEntity<>(fileResource, filePartHeaders));
+
+            PaymentResponse paymentResponse = paymentRestClient.post()
+                    .uri("/payments/process-with-check")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(multipartBody)
+                    .retrieve()
+                    .body(PaymentResponse.class);
+
+            if (paymentResponse == null) {
+                throw new PaymentFailedException("Payment service returned no response");
+            }
+
+            order.setStatus(paymentResponse.getStatus() == PaymentStatusEnum.ACCEPTED ? StatusEnum.PAID : StatusEnum.UNPAID);
+            orderRepository.save(order);
+
+            log.info("event=payment_with_check_processed orderId={} paymentStatus={}", order.getId(), paymentResponse.getStatus());
+            return orderMapper.toResponseDTO(order);
+        } catch (IOException e) {
+            log.error("Failed to read check file for order {}", id, e);
+            throw new PaymentFailedException("Could not read uploaded check file: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to process payment with check for order {}", id, e);
+            throw new PaymentFailedException("Could not process payment with check: " + e.getMessage());
+        }
     }
 
     /**
